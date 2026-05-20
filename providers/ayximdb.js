@@ -105,12 +105,13 @@ function getStreams(tmdbId, mediaType, season, episode) {
       if (data.streams && data.streams.length > 0) {
         data.streams.forEach(function(stream) {
           if (!stream.url) return;
-          streams.push({
-            name:    'AyxImdb',
-            title:   buildStreamLabel(stream),
-            url:     stream.url,
-            quality: (stream.quality || '').trim(),
-          });
+          var label   = buildStreamLabel(stream);
+var quality = (stream.quality || '').trim();
+streams.push({
+  name:  'AyxImdb\n' + (quality ? quality + '  ' : '') + label,
+  title: label,
+  url:   stream.url,
+});
         });
       } else if (data.downloads) {
         data.downloads.forEach(function(download) {
