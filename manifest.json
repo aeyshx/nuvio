@@ -1,26 +1,21 @@
-[
-  {
-    "id": "template-provider",
-    "name": "Template Provider",
-    "description": "A starter template for creating Nuvio providers.",
-    "version": "1.0.0",
-    "author": "Your Name",
-    "supportedTypes": [
-      "movie",
-      "tv"
-    ],
-    "filename": "providers/template.js",
-    "enabled": false,
-    "logo": "",
-    "contentLanguage": [
-      "en"
-    ],
-    "formats": [
-      "mp4",
-      "mkv"
-    ],
-    "limited": false,
-    "disabledPlatforms": [],
-    "supportsExternalPlayer": true
-  }
-]
+{
+  "id": "ayximdb",
+  "name": "AyxImdb",
+  "description": "Movies and TV streams via GoatAPI, indexed by IMDB/TMDB.",
+  "version": "1.0.0",
+  "author": "ayx",
+  "supportedTypes": [
+    "movie",
+    "tv"
+  ],
+  "filename": "providers/ayximdb.js",
+  "enabled": true,
+  "contentLanguage": [
+    "en"
+  ],
+  "formats": [
+    "mp4",
+    "mkv"
+  ],
+  "supportsExternalPlayer": true
+}
