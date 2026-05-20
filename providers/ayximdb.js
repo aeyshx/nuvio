@@ -9,7 +9,9 @@ function normalizeCodecLabel(codec) {
 }
  
 function buildStreamLabel(stream) {
-  var sizeText = ((stream.size || '').trim()) || '?';
+  var sizeText = (stream.size || '').trim();
+ 
+  // Build the descriptive part — always normalize codec
   var desc = (stream.label || '').trim();
   if (!desc) {
     var parts = [];
@@ -27,7 +29,9 @@ function buildStreamLabel(stream) {
     if ((stream.codec   || '').trim()) fb.push(normalizeCodecLabel(stream.codec));
     desc = fb.join(' ') || 'Stream';
   }
-  return '[' + sizeText + ']  ' + desc;
+ 
+  // Only show [size] prefix when the API actually returned one
+  return sizeText ? '[' + sizeText + ']  ' + desc : desc;
 }
  
 function buildDownloadLabel(download, src) {
