@@ -1,21 +1,25 @@
 {
-  "id": "ayximdb",
-  "name": "AyxImdb",
-  "description": "Movies and TV streams via GoatAPI, indexed by IMDB/TMDB.",
+  "name": "AYX",
   "version": "1.0.0",
-  "author": "ayx",
-  "supportedTypes": [
-    "movie",
-    "tv"
-  ],
-  "filename": "providers/ayximdb.js",
-  "enabled": true,
-  "contentLanguage": [
-    "en"
-  ],
-  "formats": [
-    "mp4",
-    "mkv"
-  ],
-  "supportsExternalPlayer": true
+  "scrapers": [
+    {
+      "id": "ayximdb",
+      "name": "AyxImdb",
+      "description": "Movies via GoatAPI, indexed by TMDB.",
+      "version": "1.0.0",
+      "author": "aeyshx",
+      "supportedTypes": [
+        "movie"
+      ],
+      "filename": "providers/ayximdb.js",
+      "enabled": true,
+      "formats": [
+        "mp4",
+        "mkv"
+      ],
+      "contentLanguage": [
+        "en"
+      ]
+    }
+  ]
 }
