@@ -8,37 +8,95 @@ function normalizeCodecLabel(codec) {
   }
 }
 
-function buildStreamLabel(stream) {
-  var sizeText = (stream.size || '').trim();
-
-  var desc = (stream.label || '').trim();
-  if (!desc) {
-    var parts = [];
-    if ((stream.quality || '').trim())  parts.push(stream.quality.trim());
-    var rel = ((stream.release || stream.source || '')).trim();
-    if (rel)                            parts.push(rel);
-    if ((stream.encode || '').trim())   parts.push(stream.encode.trim());
-    if ((stream.format || '').trim())   parts.push(stream.format.trim());
-    if ((stream.codec  || '').trim())   parts.push(normalizeCodecLabel(stream.codec));
-    desc = parts.join(' ');
+// Scan every text field on a stream object for a resolution pattern
+function detectQuality(stream) {
+  var candidates = [
+    stream.quality, stream.label, stream.title,
+    stream.release, stream.source, stream.encode,
+    stream.format,  stream.codec,  stream.url
+  ];
+  for (var i = 0; i < candidates.length; i++) {
+    var t = String(candidates[i] || '').toLowerCase();
+    if (!t) continue;
+    if (/\b2160p\b/.test(t) || /\b4k\b/.test(t) || /\buhd\b/.test(t)) return '2160p';
+    if (/\b1080p\b/.test(t)) return '1080p';
+    if (/\b720p\b/.test(t))  return '720p';
+    if (/\b480p\b/.test(t))  return '480p';
+    if (/\b360p\b/.test(t))  return '360p';
   }
-  if (!desc) {
-    var fb = [];
-    if ((stream.quality || '').trim()) fb.push(stream.quality.trim());
-    if ((stream.codec   || '').trim()) fb.push(normalizeCodecLabel(stream.codec));
-    desc = fb.join(' ') || 'Stream';
-  }
-
-  return sizeText ? '[' + sizeText + ']  ' + desc : desc;
+  // Guess from size as last resort
+  var size = parseFloat(String(stream.size || '0'));
+  if (size > 15)  return '2160p';  // >15 GB → likely 4K
+  if (size > 4)   return '1080p';  // 4–15 GB → likely 1080p
+  if (size > 1)   return '720p';
+  return '';
 }
 
-function buildDownloadLabel(download, src) {
-  var sz   = ((download.size || '').trim()) || '?';
+function buildStreamMeta(stream) {
+  var quality = detectQuality(stream);
+  var size    = (stream.size    || '').trim();
+  var codec   = normalizeCodecLabel(stream.codec || '');
+  var source  = (stream.release || stream.source || stream.encode || stream.format || '').trim();
+  var label   = (stream.label   || '').trim();
+
+  // ── name: everything Nuvio reliably shows on the card ──────────────────
+  // Format: "AyxImdb | 1080p | 2.1 GB | BluRay H265"
+  var nameParts = ['AyxImdb'];
+  if (quality) nameParts.push(quality);
+  if (size)    nameParts.push(size);
+  // append tech tokens if present
+  var techParts = [];
+  if (source) techParts.push(source);
+  if (codec)  techParts.push(codec);
+  if (techParts.length) nameParts.push(techParts.join(' '));
+  var name = nameParts.join(' | ');
+
+  // ── title: multi-line detail (shown in test mode / some Nuvio builds) ──
+  var line1Parts = [];
+  if (quality) line1Parts.push('📺 ' + quality);
+  if (size)    line1Parts.push('💾 ' + size);
+  var line1 = line1Parts.join(' | ') || '📺 Stream';
+
+  var line2Parts = [];
+  if (source) line2Parts.push(source);
+  if (codec)  line2Parts.push(codec);
+  var line2 = line2Parts.length ? ('🎞️ ' + line2Parts.join(' ')) : '';
+
+  var titleLines = [line1];
+  if (line2) titleLines.push(line2);
+  if (label) titleLines.push('ℹ️ ' + label);
+
+  return { name: name, title: titleLines.join('\n') };
+}
+
+function buildDownloadMeta(download, src) {
+  var sz   = (download.size || '').trim() || '?';
   var tech = abbreviatedReleaseTech(download.title);
-  var base = '[' + sz + ']  ' + tech;
-  var host = ((src.name || '').trim());
-  if (host) host = host.replace(/\s+\d+$/, '').trim();
-  return host ? (base + ' - ' + host) : base;
+  var host = (src.name || '').trim().replace(/\s+\d+$/, '').trim();
+
+  // Detect quality from download title + tech string
+  var fakeStream = { label: download.title, size: sz };
+  var quality = detectQuality(fakeStream);
+
+  // ── name ──────────────────────────────────────────────────────────────
+  var nameParts = ['AyxImdb'];
+  if (quality) nameParts.push(quality);
+  nameParts.push(sz);
+  if (host) nameParts.push(host);
+  var name = nameParts.join(' | ');
+
+  // ── title ─────────────────────────────────────────────────────────────
+  var line1Parts = [];
+  if (quality) line1Parts.push('📺 ' + quality);
+  line1Parts.push('💾 ' + sz);
+  var line1 = line1Parts.join(' | ');
+  var line2 = '🎞️ ' + tech;
+  var line3 = host ? ('🌐 ' + host) : '';
+
+  var titleLines = [line1, line2];
+  if (line3) titleLines.push(line3);
+
+  return { name: name, title: titleLines.join('\n') };
 }
 
 function mergeReleaseTokens(tokens) {
@@ -81,67 +139,6 @@ function abbreviatedReleaseTech(rawTitle) {
   return spaced || stem.replace(/\./g, ' ');
 }
 
-// --- KEY FIX: Build name and title the way Nuvio actually renders them ---
-// Nuvio shows `name` as the card header and `title` as the multi-line detail below.
-// Putting quality/size in `name` is what makes them visible in actual (non-test) mode.
-
-function buildStreamMeta(stream) {
-  var quality = (stream.quality || '').trim();
-  var size    = (stream.size    || '').trim();
-  var codec   = (stream.codec   || '').trim();
-  var source  = (stream.release || stream.source || '').trim();
-
-  // name: short header shown on the stream card
-  var nameParts = ['AyxImdb'];
-  if (quality) nameParts.push(quality);
-  if (size)    nameParts.push(size);
-  var name = nameParts.join(' | ');
-
-  // title: multi-line detail shown below the card header
-  var line1Parts = [];
-  if (quality) line1Parts.push('📺 ' + quality);
-  if (size)    line1Parts.push('💾 ' + size);
-  var line1 = line1Parts.join(' | ') || '📺 Stream';
-
-  var line2Parts = [];
-  if (source)                      line2Parts.push(source);
-  if ((stream.encode || '').trim()) line2Parts.push(stream.encode.trim());
-  if ((stream.format || '').trim()) line2Parts.push(stream.format.trim());
-  if (codec)                        line2Parts.push(normalizeCodecLabel(codec));
-  var line2 = line2Parts.length ? ('🎞️ ' + line2Parts.join(' ')) : '';
-
-  var titleLines = [line1];
-  if (line2) titleLines.push(line2);
-  if (stream.label && stream.label.trim()) titleLines.push('ℹ️ ' + stream.label.trim());
-
-  return {
-    name:  name,
-    title: titleLines.join('\n')
-  };
-}
-
-function buildDownloadMeta(download, src) {
-  var sz   = ((download.size || '').trim()) || '?';
-  var tech = abbreviatedReleaseTech(download.title);
-  var host = ((src.name || '').trim()).replace(/\s+\d+$/, '').trim();
-
-  // name: short card header
-  var name = 'AyxImdb | ' + sz;
-
-  // title: detail lines
-  var line1 = '💾 ' + sz;
-  var line2 = '🎞️ ' + tech;
-  var line3 = host ? ('🌐 ' + host) : '';
-
-  var titleLines = [line1, line2];
-  if (line3) titleLines.push(line3);
-
-  return {
-    name:  name,
-    title: titleLines.join('\n')
-  };
-}
-
 function getStreams(tmdbId, mediaType, season, episode) {
   console.log('[AyxImdb] getStreams → tmdbId=' + tmdbId + ' type=' + mediaType);
 
@@ -165,22 +162,14 @@ function getStreams(tmdbId, mediaType, season, episode) {
         data.streams.forEach(function(stream) {
           if (!stream.url) return;
           var ui = buildStreamMeta(stream);
-          streams.push({
-            name:  ui.name,
-            title: ui.title,
-            url:   stream.url,
-          });
+          streams.push({ name: ui.name, title: ui.title, url: stream.url });
         });
       } else if (data.downloads) {
         data.downloads.forEach(function(download) {
           (download.sources || []).forEach(function(src) {
             if (!src.url) return;
             var ui = buildDownloadMeta(download, src);
-            streams.push({
-              name:  ui.name,
-              title: ui.title,
-              url:   src.url,
-            });
+            streams.push({ name: ui.name, title: ui.title, url: src.url });
           });
         });
       }
