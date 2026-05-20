@@ -7,11 +7,10 @@ function normalizeCodecLabel(codec) {
     default: return (codec || '').trim().toUpperCase();
   }
 }
- 
+
 function buildStreamLabel(stream) {
   var sizeText = (stream.size || '').trim();
- 
-  // Build the descriptive part — always normalize codec
+
   var desc = (stream.label || '').trim();
   if (!desc) {
     var parts = [];
@@ -29,11 +28,10 @@ function buildStreamLabel(stream) {
     if ((stream.codec   || '').trim()) fb.push(normalizeCodecLabel(stream.codec));
     desc = fb.join(' ') || 'Stream';
   }
- 
-  // Only show [size] prefix when the API actually returned one
+
   return sizeText ? '[' + sizeText + ']  ' + desc : desc;
 }
- 
+
 function buildDownloadLabel(download, src) {
   var sz   = ((download.size || '').trim()) || '?';
   var tech = abbreviatedReleaseTech(download.title);
@@ -42,7 +40,7 @@ function buildDownloadLabel(download, src) {
   if (host) host = host.replace(/\s+\d+$/, '').trim();
   return host ? (base + ' - ' + host) : base;
 }
- 
+
 function mergeReleaseTokens(tokens) {
   var out = [];
   var i = 0;
@@ -61,7 +59,7 @@ function mergeReleaseTokens(tokens) {
   }
   return out;
 }
- 
+
 function abbreviatedReleaseTech(rawTitle) {
   if (!rawTitle || !rawTitle.trim()) return 'Stream';
   var stem = rawTitle.trim().replace(/\.[^.]+$/, '') || rawTitle.trim();
@@ -82,16 +80,77 @@ function abbreviatedReleaseTech(rawTitle) {
     .trim();
   return spaced || stem.replace(/\./g, ' ');
 }
- 
+
+// --- KEY FIX: Build name and title the way Nuvio actually renders them ---
+// Nuvio shows `name` as the card header and `title` as the multi-line detail below.
+// Putting quality/size in `name` is what makes them visible in actual (non-test) mode.
+
+function buildStreamMeta(stream) {
+  var quality = (stream.quality || '').trim();
+  var size    = (stream.size    || '').trim();
+  var codec   = (stream.codec   || '').trim();
+  var source  = (stream.release || stream.source || '').trim();
+
+  // name: short header shown on the stream card
+  var nameParts = ['AyxImdb'];
+  if (quality) nameParts.push(quality);
+  if (size)    nameParts.push(size);
+  var name = nameParts.join(' | ');
+
+  // title: multi-line detail shown below the card header
+  var line1Parts = [];
+  if (quality) line1Parts.push('📺 ' + quality);
+  if (size)    line1Parts.push('💾 ' + size);
+  var line1 = line1Parts.join(' | ') || '📺 Stream';
+
+  var line2Parts = [];
+  if (source)                      line2Parts.push(source);
+  if ((stream.encode || '').trim()) line2Parts.push(stream.encode.trim());
+  if ((stream.format || '').trim()) line2Parts.push(stream.format.trim());
+  if (codec)                        line2Parts.push(normalizeCodecLabel(codec));
+  var line2 = line2Parts.length ? ('🎞️ ' + line2Parts.join(' ')) : '';
+
+  var titleLines = [line1];
+  if (line2) titleLines.push(line2);
+  if (stream.label && stream.label.trim()) titleLines.push('ℹ️ ' + stream.label.trim());
+
+  return {
+    name:  name,
+    title: titleLines.join('\n')
+  };
+}
+
+function buildDownloadMeta(download, src) {
+  var sz   = ((download.size || '').trim()) || '?';
+  var tech = abbreviatedReleaseTech(download.title);
+  var host = ((src.name || '').trim()).replace(/\s+\d+$/, '').trim();
+
+  // name: short card header
+  var name = 'AyxImdb | ' + sz;
+
+  // title: detail lines
+  var line1 = '💾 ' + sz;
+  var line2 = '🎞️ ' + tech;
+  var line3 = host ? ('🌐 ' + host) : '';
+
+  var titleLines = [line1, line2];
+  if (line3) titleLines.push(line3);
+
+  return {
+    name:  name,
+    title: titleLines.join('\n')
+  };
+}
+
 function getStreams(tmdbId, mediaType, season, episode) {
   console.log('[AyxImdb] getStreams → tmdbId=' + tmdbId + ' type=' + mediaType);
- 
+
   if (mediaType !== 'movie') {
     return Promise.resolve([]);
   }
- 
+
   var apiUrl = 'https://goatapi.imreallydagoatt.workers.dev/api/downloader/movie/' + tmdbId;
- 
+
   return fetch(apiUrl)
     .then(function(res) { return res.json(); })
     .then(function(data) {
@@ -99,34 +158,33 @@ function getStreams(tmdbId, mediaType, season, episode) {
         console.log('[AyxImdb] GoatAPI success=false');
         return [];
       }
- 
+
       var streams = [];
- 
+
       if (data.streams && data.streams.length > 0) {
         data.streams.forEach(function(stream) {
           if (!stream.url) return;
-          var label   = buildStreamLabel(stream);
-var quality = (stream.quality || '').trim();
-streams.push({
-  name:  'AyxImdb\n' + (quality ? quality + '  ' : '') + label,
-  title: label,
-  url:   stream.url,
-});
+          var ui = buildStreamMeta(stream);
+          streams.push({
+            name:  ui.name,
+            title: ui.title,
+            url:   stream.url,
+          });
         });
       } else if (data.downloads) {
         data.downloads.forEach(function(download) {
           (download.sources || []).forEach(function(src) {
             if (!src.url) return;
+            var ui = buildDownloadMeta(download, src);
             streams.push({
-              name:    'AyxImdb',
-              title:   buildDownloadLabel(download, src),
-              url:     src.url,
-              quality: '',
+              name:  ui.name,
+              title: ui.title,
+              url:   src.url,
             });
           });
         });
       }
- 
+
       console.log('[AyxImdb] Returning ' + streams.length + ' stream(s)');
       return streams;
     })
@@ -135,5 +193,5 @@ streams.push({
       return [];
     });
 }
- 
+
 module.exports = { getStreams };
