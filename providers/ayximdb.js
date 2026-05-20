@@ -8,16 +8,29 @@ function normalizeCodecLabel(codec) {
   }
 }
 
+// Detect resolution from any text field or filename
+function detectQuality(texts) {
+  var sources = Array.isArray(texts) ? texts : [texts];
+  for (var i = 0; i < sources.length; i++) {
+    var t = String(sources[i] || '').toLowerCase();
+    if (!t) continue;
+    if (/\b2160p\b/.test(t) || /\b4k\b/.test(t) || /\buhd\b/.test(t)) return '2160p';
+    if (/\b1080p\b/.test(t)) return '1080p';
+    if (/\b720p\b/.test(t))  return '720p';
+    if (/\b480p\b/.test(t))  return '480p';
+    if (/\b360p\b/.test(t))  return '360p';
+  }
+  return '';
+}
+
 // Extract the actual filename (with extension) from URL or stream fields
 function extractFilename(stream) {
-  // 1. Try explicit filename-like fields that already have an extension
   var textFields = [stream.filename, stream.file, stream.name, stream.label, stream.title];
   for (var i = 0; i < textFields.length; i++) {
     var v = (textFields[i] || '').trim();
     if (v && /\.(mkv|mp4|avi|m4v|mov)$/i.test(v)) return v;
   }
 
-  // 2. Pull filename from the URL path
   if (stream.url) {
     try {
       var path = stream.url.split('?')[0].split('#')[0];
@@ -27,37 +40,29 @@ function extractFilename(stream) {
     } catch (e) {}
   }
 
-  // 3. Build a descriptive pseudo-filename from what the API gives us
   var parts = [];
-  if ((stream.quality || '').trim())                parts.push(stream.quality.trim());
+  if ((stream.quality || '').trim())               parts.push(stream.quality.trim());
   var rel = (stream.release || stream.source || '').trim();
-  if (rel)                                          parts.push(rel);
-  if ((stream.encode || '').trim())                 parts.push(stream.encode.trim());
-  if ((stream.format || '').trim())                 parts.push(stream.format.trim());
-  if ((stream.codec  || '').trim())                 parts.push(normalizeCodecLabel(stream.codec));
-  if ((stream.label  || '').trim())                 parts.push(stream.label.trim());
+  if (rel)                                         parts.push(rel);
+  if ((stream.encode || '').trim())                parts.push(stream.encode.trim());
+  if ((stream.format || '').trim())                parts.push(stream.format.trim());
+  if ((stream.codec  || '').trim())                parts.push(normalizeCodecLabel(stream.codec));
+  if ((stream.label  || '').trim())                parts.push(stream.label.trim());
   var desc = parts.join('.');
   if (desc) return desc + '.mkv';
 
   return 'stream.mkv';
 }
 
-// Extract filename for the downloads path from the download title
 function extractDownloadFilename(download, src) {
-  // Try source name first
-  var srcName = (src.name || '').trim().replace(/\s+\d+$/, '').trim();
-
-  // Try pulling from download.title (usually looks like a release filename)
   var title = (download.title || '').trim();
   if (/\.(mkv|mp4|avi|m4v|mov)$/i.test(title)) return title;
-
-  // Build from title tokens
   if (title) {
     var clean = title.replace(/\s+/g, '.').replace(/\.{2,}/g, '.');
     if (!/\.(mkv|mp4)$/i.test(clean)) clean = clean + '.mkv';
     return clean;
   }
-
+  var srcName = (src.name || '').trim().replace(/\s+\d+$/, '').trim();
   return (srcName || 'stream') + '.mkv';
 }
 
@@ -74,6 +79,24 @@ function abbreviatedReleaseTech(rawTitle) {
   }
   var tokens = cropped.split('.').filter(function(t) { return t.length > 0; });
   return tokens.join(' ').replace(/blu\s*ray/gi, 'BluRay').trim() || stem.replace(/\./g, ' ');
+}
+
+// Extract a clean short source/server name from a source field or URL
+function extractSourceName(stream) {
+  // Try stream.source or stream.release as label
+  var srcField = (stream.source || stream.release || '').trim();
+  if (srcField) return srcField;
+
+  // Try to pull host name from URL
+  if (stream.url) {
+    try {
+      var host = new URL(stream.url).hostname.replace(/^www\./, '');
+      // Grab first meaningful segment: "pixeldrain.com" → "Pixeldrain"
+      var seg = host.split('.')[0];
+      return seg.charAt(0).toUpperCase() + seg.slice(1);
+    } catch (e) {}
+  }
+  return '';
 }
 
 function getStreams(tmdbId, mediaType, season, episode) {
@@ -99,21 +122,27 @@ function getStreams(tmdbId, mediaType, season, episode) {
         data.streams.forEach(function(stream) {
           if (!stream.url) return;
 
-          var filename = extractFilename(stream);
-          var size     = (stream.size || '').trim();
+          var filename   = extractFilename(stream);
+          var size       = (stream.size || '').trim();
+          var sourceName = extractSourceName(stream);
+          var quality    = detectQuality([
+            stream.quality, stream.label, stream.title,
+            stream.release, stream.source, stream.encode,
+            stream.format,  stream.codec,  filename, stream.url
+          ]);
 
-          // Layout matches hdhub4u exactly:
-          //   name    → "AyxImdb"          (card header)
-          //   title   → tech/release info   (line below header)
-          //   quality → full filename.mkv   (shown where "720p" would be)
-          //   size    → "20.92 GB"          (shown next to quality as "filename.mkv • 20.92 GB")
-          var tech = abbreviatedReleaseTech(
-            [stream.release, stream.source, stream.encode, stream.format, stream.label].join('.')
-          );
+          // name:    "AyxImdb Pixeldrain"
+          // title:   "Pixeldrain | 2160p | 66.41 GB"
+          // quality: "Little.Women.2019.2160p....mkv"   ← bottom badge
+          // size:    "66.41 GB"                         ← next to filename
+          var titleParts = [];
+          if (sourceName) titleParts.push(sourceName);
+          if (quality)    titleParts.push(quality);
+          if (size)       titleParts.push(size);
 
           streams.push({
-            name:    'AyxImdb',
-            title:   tech || filename,
+            name:    'AyxImdb' + (sourceName ? ' ' + sourceName : ''),
+            title:   titleParts.join(' | ') || 'Stream',
             quality: filename,
             size:    size,
             url:     stream.url,
@@ -124,13 +153,19 @@ function getStreams(tmdbId, mediaType, season, episode) {
           (download.sources || []).forEach(function(src) {
             if (!src.url) return;
 
-            var filename = extractDownloadFilename(download, src);
-            var size     = (download.size || '').trim();
-            var host     = (src.name || '').trim().replace(/\s+\d+$/, '').trim();
+            var filename   = extractDownloadFilename(download, src);
+            var size       = (download.size || '').trim();
+            var host       = (src.name || '').trim().replace(/\s+\d+$/, '').trim();
+            var quality    = detectQuality([download.title, filename]);
+
+            var titleParts = [];
+            if (host)    titleParts.push(host);
+            if (quality) titleParts.push(quality);
+            if (size)    titleParts.push(size);
 
             streams.push({
               name:    'AyxImdb' + (host ? ' ' + host : ''),
-              title:   abbreviatedReleaseTech(download.title),
+              title:   titleParts.join(' | ') || 'Stream',
               quality: filename,
               size:    size,
               url:     src.url,
