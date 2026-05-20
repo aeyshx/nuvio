@@ -8,114 +8,57 @@ function normalizeCodecLabel(codec) {
   }
 }
 
-// Scan every text field on a stream object for a resolution pattern
-function detectQuality(stream) {
-  var candidates = [
-    stream.quality, stream.label, stream.title,
-    stream.release, stream.source, stream.encode,
-    stream.format,  stream.codec,  stream.url
-  ];
-  for (var i = 0; i < candidates.length; i++) {
-    var t = String(candidates[i] || '').toLowerCase();
-    if (!t) continue;
-    if (/\b2160p\b/.test(t) || /\b4k\b/.test(t) || /\buhd\b/.test(t)) return '2160p';
-    if (/\b1080p\b/.test(t)) return '1080p';
-    if (/\b720p\b/.test(t))  return '720p';
-    if (/\b480p\b/.test(t))  return '480p';
-    if (/\b360p\b/.test(t))  return '360p';
+// Extract the actual filename (with extension) from URL or stream fields
+function extractFilename(stream) {
+  // 1. Try explicit filename-like fields that already have an extension
+  var textFields = [stream.filename, stream.file, stream.name, stream.label, stream.title];
+  for (var i = 0; i < textFields.length; i++) {
+    var v = (textFields[i] || '').trim();
+    if (v && /\.(mkv|mp4|avi|m4v|mov)$/i.test(v)) return v;
   }
-  // Guess from size as last resort
-  var size = parseFloat(String(stream.size || '0'));
-  if (size > 15)  return '2160p';  // >15 GB → likely 4K
-  if (size > 4)   return '1080p';  // 4–15 GB → likely 1080p
-  if (size > 1)   return '720p';
-  return '';
-}
 
-function buildStreamMeta(stream) {
-  var quality = detectQuality(stream);
-  var size    = (stream.size    || '').trim();
-  var codec   = normalizeCodecLabel(stream.codec || '');
-  var source  = (stream.release || stream.source || stream.encode || stream.format || '').trim();
-  var label   = (stream.label   || '').trim();
-
-  // ── name: everything Nuvio reliably shows on the card ──────────────────
-  // Format: "AyxImdb | 1080p | 2.1 GB | BluRay H265"
-  var nameParts = ['AyxImdb'];
-  if (quality) nameParts.push(quality);
-  if (size)    nameParts.push(size);
-  // append tech tokens if present
-  var techParts = [];
-  if (source) techParts.push(source);
-  if (codec)  techParts.push(codec);
-  if (techParts.length) nameParts.push(techParts.join(' '));
-  var name = nameParts.join(' | ');
-
-  // ── title: multi-line detail (shown in test mode / some Nuvio builds) ──
-  var line1Parts = [];
-  if (quality) line1Parts.push('📺 ' + quality);
-  if (size)    line1Parts.push('💾 ' + size);
-  var line1 = line1Parts.join(' | ') || '📺 Stream';
-
-  var line2Parts = [];
-  if (source) line2Parts.push(source);
-  if (codec)  line2Parts.push(codec);
-  var line2 = line2Parts.length ? ('🎞️ ' + line2Parts.join(' ')) : '';
-
-  var titleLines = [line1];
-  if (line2) titleLines.push(line2);
-  if (label) titleLines.push('ℹ️ ' + label);
-
-  return { name: name, title: titleLines.join('\n') };
-}
-
-function buildDownloadMeta(download, src) {
-  var sz   = (download.size || '').trim() || '?';
-  var tech = abbreviatedReleaseTech(download.title);
-  var host = (src.name || '').trim().replace(/\s+\d+$/, '').trim();
-
-  // Detect quality from download title + tech string
-  var fakeStream = { label: download.title, size: sz };
-  var quality = detectQuality(fakeStream);
-
-  // ── name ──────────────────────────────────────────────────────────────
-  var nameParts = ['AyxImdb'];
-  if (quality) nameParts.push(quality);
-  nameParts.push(sz);
-  if (host) nameParts.push(host);
-  var name = nameParts.join(' | ');
-
-  // ── title ─────────────────────────────────────────────────────────────
-  var line1Parts = [];
-  if (quality) line1Parts.push('📺 ' + quality);
-  line1Parts.push('💾 ' + sz);
-  var line1 = line1Parts.join(' | ');
-  var line2 = '🎞️ ' + tech;
-  var line3 = host ? ('🌐 ' + host) : '';
-
-  var titleLines = [line1, line2];
-  if (line3) titleLines.push(line3);
-
-  return { name: name, title: titleLines.join('\n') };
-}
-
-function mergeReleaseTokens(tokens) {
-  var out = [];
-  var i = 0;
-  while (i < tokens.length) {
-    var cur = tokens[i];
-    var n   = tokens[i + 1];
-    var nn  = tokens[i + 2];
-    if (cur.toUpperCase() === 'MA' && n && nn &&
-        /^\d{1,2}$/.test(n) && /^\d{1,2}$/.test(nn)) {
-      out.push(cur + '.' + n + '.' + nn); i += 3; continue;
-    }
-    if (n && /^\d{1,2}$/.test(n) && /[a-zA-Z]/.test(cur) && /\d$/.test(cur)) {
-      out.push(cur + '.' + n); i += 2; continue;
-    }
-    out.push(cur); i++;
+  // 2. Pull filename from the URL path
+  if (stream.url) {
+    try {
+      var path = stream.url.split('?')[0].split('#')[0];
+      var segments = path.split('/');
+      var last = decodeURIComponent(segments[segments.length - 1] || '');
+      if (last && /\.(mkv|mp4|avi|m4v|mov)$/i.test(last)) return last;
+    } catch (e) {}
   }
-  return out;
+
+  // 3. Build a descriptive pseudo-filename from what the API gives us
+  var parts = [];
+  if ((stream.quality || '').trim())                parts.push(stream.quality.trim());
+  var rel = (stream.release || stream.source || '').trim();
+  if (rel)                                          parts.push(rel);
+  if ((stream.encode || '').trim())                 parts.push(stream.encode.trim());
+  if ((stream.format || '').trim())                 parts.push(stream.format.trim());
+  if ((stream.codec  || '').trim())                 parts.push(normalizeCodecLabel(stream.codec));
+  if ((stream.label  || '').trim())                 parts.push(stream.label.trim());
+  var desc = parts.join('.');
+  if (desc) return desc + '.mkv';
+
+  return 'stream.mkv';
+}
+
+// Extract filename for the downloads path from the download title
+function extractDownloadFilename(download, src) {
+  // Try source name first
+  var srcName = (src.name || '').trim().replace(/\s+\d+$/, '').trim();
+
+  // Try pulling from download.title (usually looks like a release filename)
+  var title = (download.title || '').trim();
+  if (/\.(mkv|mp4|avi|m4v|mov)$/i.test(title)) return title;
+
+  // Build from title tokens
+  if (title) {
+    var clean = title.replace(/\s+/g, '.').replace(/\.{2,}/g, '.');
+    if (!/\.(mkv|mp4)$/i.test(clean)) clean = clean + '.mkv';
+    return clean;
+  }
+
+  return (srcName || 'stream') + '.mkv';
 }
 
 function abbreviatedReleaseTech(rawTitle) {
@@ -130,13 +73,7 @@ function abbreviatedReleaseTech(rawTitle) {
     cropped = ym ? stem.substring(ym.index + ym[0].length) : stem;
   }
   var tokens = cropped.split('.').filter(function(t) { return t.length > 0; });
-  var merged = mergeReleaseTokens(tokens);
-  var spaced = merged.join(' ')
-    .replace(/\s+/g, ' ').trim()
-    .replace(/\bMA\s+(\d)\s+(\d)\b/g, 'MA.$1.$2')
-    .replace(/blu\s*ray/gi, 'BluRay')
-    .trim();
-  return spaced || stem.replace(/\./g, ' ');
+  return tokens.join(' ').replace(/blu\s*ray/gi, 'BluRay').trim() || stem.replace(/\./g, ' ');
 }
 
 function getStreams(tmdbId, mediaType, season, episode) {
@@ -161,15 +98,43 @@ function getStreams(tmdbId, mediaType, season, episode) {
       if (data.streams && data.streams.length > 0) {
         data.streams.forEach(function(stream) {
           if (!stream.url) return;
-          var ui = buildStreamMeta(stream);
-          streams.push({ name: ui.name, title: ui.title, url: stream.url });
+
+          var filename = extractFilename(stream);
+          var size     = (stream.size || '').trim();
+
+          // Layout matches hdhub4u exactly:
+          //   name    → "AyxImdb"          (card header)
+          //   title   → tech/release info   (line below header)
+          //   quality → full filename.mkv   (shown where "720p" would be)
+          //   size    → "20.92 GB"          (shown next to quality as "filename.mkv • 20.92 GB")
+          var tech = abbreviatedReleaseTech(
+            [stream.release, stream.source, stream.encode, stream.format, stream.label].join('.')
+          );
+
+          streams.push({
+            name:    'AyxImdb',
+            title:   tech || filename,
+            quality: filename,
+            size:    size,
+            url:     stream.url,
+          });
         });
       } else if (data.downloads) {
         data.downloads.forEach(function(download) {
           (download.sources || []).forEach(function(src) {
             if (!src.url) return;
-            var ui = buildDownloadMeta(download, src);
-            streams.push({ name: ui.name, title: ui.title, url: src.url });
+
+            var filename = extractDownloadFilename(download, src);
+            var size     = (download.size || '').trim();
+            var host     = (src.name || '').trim().replace(/\s+\d+$/, '').trim();
+
+            streams.push({
+              name:    'AyxImdb' + (host ? ' ' + host : ''),
+              title:   abbreviatedReleaseTech(download.title),
+              quality: filename,
+              size:    size,
+              url:     src.url,
+            });
           });
         });
       }
